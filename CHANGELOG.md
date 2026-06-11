@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] — 2026-06-11
+
+### Fixed
+
+- Secrets-stage findings are now classified `critical` instead of `medium`, so a
+  committed credential blocks the merge at the default `high` threshold. Gitleaks
+  emits neither a `security-severity` score nor a SARIF `level`, so the gate's
+  generic fallback was flooring every secret at `medium` — below the gate. A
+  detected secret is a leaked credential and is treated as the highest-urgency
+  class. Caught by the [devsecops-pipeline-demo][demo] PR, where the planted
+  token was detected but did not gate.
+
 ## [1.1.1] — 2026-06-11
 
 ### Fixed
@@ -70,7 +82,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Every third-party action pinned to a full commit SHA (never a floating tag)
 - Zero secrets, tokens, or credentials committed to the repo — public-safe by construction
 
-[Unreleased]: https://github.com/Just-In-N-Out/devsecops-pipeline/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/Just-In-N-Out/devsecops-pipeline/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/Just-In-N-Out/devsecops-pipeline/releases/tag/v1.1.2
 [1.1.1]: https://github.com/Just-In-N-Out/devsecops-pipeline/releases/tag/v1.1.1
 [1.1.0]: https://github.com/Just-In-N-Out/devsecops-pipeline/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Just-In-N-Out/devsecops-pipeline/releases/tag/v1.0.0

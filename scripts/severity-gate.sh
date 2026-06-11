@@ -51,9 +51,15 @@ sha256() {
 }
 
 # --- 1. Extract findings from every SARIF file -------------------------------
-# Severity: prefer the rule's security-severity CVSS-style score; fall back to
-# the SARIF level. Fingerprint excludes line numbers so findings survive
-# rebases and unrelated edits above them.
+# Severity, in priority order:
+#   1. the rule's security-severity CVSS-style score, if present;
+#   2. for the secrets stage, critical — a committed credential is a leaked
+#      credential, the highest-urgency class. Gitleaks emits neither a score
+#      nor a SARIF level, so without this floor every secret falls through to
+#      "warning" -> medium and stops gating at the default high threshold;
+#   3. otherwise the SARIF level (error -> high, warning -> medium, else low).
+# Fingerprint excludes line numbers so findings survive rebases and unrelated
+# edits above them.
 EXTRACT_JQ='
 def sev_from_score($s): if $s >= 9 then "critical" elif $s >= 7 then "high" elif $s >= 4 then "medium" else "low" end;
 def sev_from_level($l): if $l == "error" then "high" elif $l == "warning" then "medium" else "low" end;
@@ -70,6 +76,7 @@ def sev_from_level($l): if $l == "error" then "high" elif $l == "warning" then "
       file: $file,
       line: ($r.locations[0].physicalLocation.region.startLine // 0),
       severity: (if $score != null then sev_from_score($score)
+                 elif $stage == "secrets" then "critical"
                  else sev_from_level($r.level // $rule.defaultConfiguration.level // "warning") end),
       message: (($r.message.text // "") | .[0:300]) }
 ]'
