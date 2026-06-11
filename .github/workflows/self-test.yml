@@ -1,0 +1,48 @@
+name: Self-test
+
+# Dogfood: run the full pipeline against this repo on every push. If the
+# pipeline can't keep its own repo green, it has no business gating anyone
+# else's. This is also the CI badge the README advertises.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  full-scan:
+    uses: ./.github/workflows/full-scan.yml
+    secrets: inherit
+    permissions:
+      contents: write       # sbom stage (release-asset attach on tag pushes)
+      security-events: write
+      actions: read
+      pull-requests: write
+    with:
+      severity-threshold: high
+
+  # --- Intentional failure test -------------------------------------------
+  # To verify the gate actually blocks, uncomment this job on a branch and
+  # open a PR: it plants a Terraform file that Checkov flags at high severity,
+  # so the iac stage must produce findings and the gate must FAIL the PR.
+  # Full procedure: docs/extending.md ("Verifying the gate").
+  #
+  # gate-canary:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+  #     - name: Plant known-bad IaC
+  #       run: |
+  #         cat > canary.tf <<'TF'
+  #         resource "aws_security_group_rule" "canary" {
+  #           type        = "ingress"
+  #           from_port   = 22
+  #           to_port     = 22
+  #           protocol    = "tcp"
+  #           cidr_blocks = ["0.0.0.0/0"]
+  #         }
+  #         TF
+  #         git add canary.tf && git -c user.email=ci@localhost -c user.name=ci commit -m "canary"
