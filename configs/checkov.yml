@@ -12,6 +12,12 @@ framework:
 
 soft-fail: false
 
+# The workflow checks this pipeline repo out into .devsecops-pipeline inside
+# the consumer's workspace; scanning that copy would double-count findings
+# that belong to the pipeline repo's own self-test.
+skip-path:
+  - .devsecops-pipeline
+
 # Suppressions. Empty by design — ships with zero skipped checks.
 # Prefer inline suppressions in the offending file (checkov:skip=CKV_AWS_20)
 # with a justification comment; use this list only for policy-level decisions

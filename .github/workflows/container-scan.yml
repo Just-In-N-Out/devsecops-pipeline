@@ -1,0 +1,121 @@
+name: Container scan (Trivy image)
+
+# Reusable container-image stage. Scans OS packages and language dependencies
+# baked into a built image — catches what filesystem mode can't see (base
+# image CVEs, OS packages, vendored binaries).
+#
+# The image must be pullable anonymously or already present via a prior login
+# step in the caller. Private-registry recipes: docs/usage.md.
+
+on:
+  workflow_call:
+    inputs:
+      container-image:
+        description: "Image reference to scan, e.g. ghcr.io/org/app:sha"
+        type: string
+        required: true
+      severity-threshold:
+        description: Findings at or above this level fail the build
+        type: string
+        default: high
+      baseline-branch:
+        description: Only gate on findings not already present on this branch
+        type: string
+        default: main
+      fail-on-findings:
+        description: If false, report findings but never fail (advisory mode)
+        type: boolean
+        default: true
+      post-comment:
+        description: Post a sticky PR comment (full-scan disables this and posts one consolidated comment instead)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  trivy-image:
+    name: trivy-image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # SARIF -> Security tab
+      actions: read          # baseline artifact download
+      pull-requests: write   # sticky PR comment
+    steps:
+      # Only the pipeline repo is needed — the image, not the source, is the
+      # scan target.
+      - name: Resolve pipeline repo and ref
+        id: pipeline
+        env:
+          JOB_WORKFLOW_REF: ${{ github.job_workflow_ref }}
+        run: |
+          echo "repo=${JOB_WORKFLOW_REF%%/.github/*}" >> "$GITHUB_OUTPUT"
+          echo "ref=${JOB_WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ${{ steps.pipeline.outputs.repo }}
+          ref: ${{ steps.pipeline.outputs.ref }}
+          path: .devsecops-pipeline
+
+      - name: Prepare output dir
+        run: mkdir -p sarif-out
+
+      - name: Run Trivy (image)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ inputs.container-image }}
+          scanners: vuln
+          format: sarif
+          output: sarif-out/trivy-image.sarif
+          trivyignores: .devsecops-pipeline/configs/trivy-ignore.yaml
+          exit-code: "0"
+
+      - name: Upload SARIF artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sarif-container
+          path: sarif-out/
+          if-no-files-found: ignore
+
+      - name: Upload SARIF to Security tab
+        if: hashFiles('sarif-out/trivy-image.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        with:
+          sarif_file: sarif-out/trivy-image.sarif
+          category: container
+
+      - name: Severity gate
+        env:
+          SARIF_DIR: sarif-out
+          STAGE_NAME: container
+          SEVERITY_THRESHOLD: ${{ inputs.severity-threshold }}
+          FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+          BASELINE_BRANCH: ${{ inputs.baseline-branch }}
+          BASELINE_ARTIFACT_NAME: scan-summary-container
+          SUMMARY_PATH: scan-summary.json
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash .devsecops-pipeline/scripts/severity-gate.sh
+
+      - name: Upload scan summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scan-summary-container
+          path: scan-summary.json
+          if-no-files-found: ignore
+
+      - name: Post PR comment
+        if: always() && inputs.post-comment && github.event_name == 'pull_request'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          SUMMARY_PATH: scan-summary.json
+          STAGE_MARKER: container
+        with:
+          script: |
+            const run = require('./.devsecops-pipeline/scripts/pr-comment.js');
+            await run({ github, context, core });
