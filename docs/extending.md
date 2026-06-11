@@ -61,10 +61,22 @@ jobs:
       - name: Resolve pipeline repo and ref
         id: pipeline
         env:
-          JOB_WORKFLOW_REF: ${{ github.job_workflow_ref }}
+          # Two candidates because the documented home of this value has
+          # moved between contexts; whichever is populated wins. Both give
+          # "owner/repo/.github/workflows/<file>.yml@<ref>" for the workflow
+          # file defining THIS job (i.e. the pipeline repo at the consumer's
+          # pinned ref).
+          CANDIDATE_A: ${{ github.job_workflow_ref }}
+          CANDIDATE_B: ${{ job.workflow_ref }}
         run: |
-          echo "repo=${JOB_WORKFLOW_REF%%/.github/*}" >> "$GITHUB_OUTPUT"
-          echo "ref=${JOB_WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
+          ref_path="${CANDIDATE_A:-$CANDIDATE_B}"
+          echo "job_workflow_ref candidates: A='$CANDIDATE_A' B='$CANDIDATE_B'"
+          if [ -z "$ref_path" ]; then
+            echo "::error::Cannot resolve the pipeline workflow ref from the job context"
+            exit 1
+          fi
+          echo "repo=${ref_path%%/.github/*}" >> "$GITHUB_OUTPUT"
+          echo "ref=${ref_path##*@}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:

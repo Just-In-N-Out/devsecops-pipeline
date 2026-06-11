@@ -2,6 +2,10 @@ name: SAST (Semgrep)
 
 # Reusable static-analysis stage. Composes public Semgrep registry packs
 # listed in configs/semgrep.yml — maintained rulesets beat hand-rolled rules.
+#
+# Two jobs on purpose: the scan runs inside the pinned semgrep container
+# (Alpine — no bash/jq/gh), so the gate runs in a follow-up ubuntu job where
+# severity-gate.sh has its toolchain. SARIF crosses over as an artifact.
 
 on:
   workflow_call:
@@ -41,18 +45,28 @@ jobs:
     permissions:
       contents: read
       security-events: write # SARIF -> Security tab
-      actions: read          # baseline artifact download
-      pull-requests: write   # sticky PR comment
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Resolve pipeline repo and ref
         id: pipeline
         env:
-          JOB_WORKFLOW_REF: ${{ github.job_workflow_ref }}
+          # Two candidates because the documented home of this value has
+          # moved between contexts; whichever is populated wins. Both give
+          # "owner/repo/.github/workflows/<file>.yml@<ref>" for the workflow
+          # file defining THIS job (i.e. the pipeline repo at the consumer's
+          # pinned ref).
+          CANDIDATE_A: ${{ github.job_workflow_ref }}
+          CANDIDATE_B: ${{ job.workflow_ref }}
         run: |
-          echo "repo=${JOB_WORKFLOW_REF%%/.github/*}" >> "$GITHUB_OUTPUT"
-          echo "ref=${JOB_WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
+          ref_path="${CANDIDATE_A:-$CANDIDATE_B}"
+          echo "job_workflow_ref candidates: A='$CANDIDATE_A' B='$CANDIDATE_B'"
+          if [ -z "$ref_path" ]; then
+            echo "::error::Cannot resolve the pipeline workflow ref from the job context"
+            exit 1
+          fi
+          echo "repo=${ref_path%%/.github/*}" >> "$GITHUB_OUTPUT"
+          echo "ref=${ref_path##*@}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -98,6 +112,49 @@ jobs:
           sarif_file: sarif-out/semgrep.sarif
           category: sast
 
+  gate:
+    name: semgrep gate
+    needs: semgrep
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read          # baseline artifact download
+      pull-requests: write   # sticky PR comment
+    steps:
+      - name: Resolve pipeline repo and ref
+        id: pipeline
+        env:
+          # Two candidates because the documented home of this value has
+          # moved between contexts; whichever is populated wins. Both give
+          # "owner/repo/.github/workflows/<file>.yml@<ref>" for the workflow
+          # file defining THIS job (i.e. the pipeline repo at the consumer's
+          # pinned ref).
+          CANDIDATE_A: ${{ github.job_workflow_ref }}
+          CANDIDATE_B: ${{ job.workflow_ref }}
+        run: |
+          ref_path="${CANDIDATE_A:-$CANDIDATE_B}"
+          echo "job_workflow_ref candidates: A='$CANDIDATE_A' B='$CANDIDATE_B'"
+          if [ -z "$ref_path" ]; then
+            echo "::error::Cannot resolve the pipeline workflow ref from the job context"
+            exit 1
+          fi
+          echo "repo=${ref_path%%/.github/*}" >> "$GITHUB_OUTPUT"
+          echo "ref=${ref_path##*@}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ${{ steps.pipeline.outputs.repo }}
+          ref: ${{ steps.pipeline.outputs.ref }}
+          path: .devsecops-pipeline
+
+      - name: Download SARIF artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: sarif-sast
+          path: sarif-out
+        # No findings -> no artifact; the gate treats an empty dir as clean.
+        continue-on-error: true
+
       - name: Severity gate
         env:
           SARIF_DIR: sarif-out
@@ -108,7 +165,9 @@ jobs:
           BASELINE_ARTIFACT_NAME: scan-summary-sast
           SUMMARY_PATH: scan-summary.json
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash .devsecops-pipeline/scripts/severity-gate.sh
+        run: |
+          mkdir -p sarif-out
+          bash .devsecops-pipeline/scripts/severity-gate.sh
 
       - name: Upload scan summary
         if: always()
