@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0] — Initial release
+## [1.0.0] — 2026-06-11
+
+### Changed
+
+- Promote `v0.1.0` to stable. First major release: the `v1` floating tag now
+  exists and tracks the latest `v1.x.x` — consumers pin `@v1` and receive
+  non-breaking updates automatically. No functional changes from `v0.1.0`.
+
+## [0.1.0] — 2026-06-11 — Initial release
 
 ### Added
 
@@ -30,5 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Every third-party action pinned to a full commit SHA (never a floating tag)
 - Zero secrets, tokens, or credentials committed to the repo — public-safe by construction
 
-[Unreleased]: https://github.com/Just-In-N-Out/devsecops-pipeline/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Just-In-N-Out/devsecops-pipeline/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Just-In-N-Out/devsecops-pipeline/releases/tag/v1.0.0
 [0.1.0]: https://github.com/Just-In-N-Out/devsecops-pipeline/releases/tag/v0.1.0
