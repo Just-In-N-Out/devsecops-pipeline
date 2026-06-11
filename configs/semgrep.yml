@@ -1,0 +1,25 @@
+# Semgrep ruleset manifest — devsecops-pipeline
+#
+# Semgrep rule files cannot reference registry packs, so this manifest is the
+# single source of truth that sast.yml reads to build its `--config` flags.
+# Keeping the pack list here (instead of hardcoded in the workflow) means
+# policy changes are config PRs, reviewable by security, with no YAML logic
+# edits.
+#
+# We compose public registry packs rather than authoring custom rules — the
+# registry packs are maintained, tested, and tuned upstream.
+
+# Packs applied to every scan regardless of language.
+base-packs:
+  - p/security-audit
+  - p/owasp-top-ten
+  - p/secrets
+  - p/ci
+
+# Pack added when the `language` input (or auto-detection) resolves to a key
+# below. Unknown/`generic` languages get base packs only.
+language-packs:
+  python: p/python
+  node: p/javascript
+  go: p/golang
+  java: p/java

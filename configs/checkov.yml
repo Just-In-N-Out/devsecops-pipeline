@@ -1,0 +1,29 @@
+# Checkov configuration — devsecops-pipeline
+#
+# Passed to checkov via --config-file. Framework detection is automatic:
+# Terraform, Dockerfile, Kubernetes manifests, CloudFormation, GitHub Actions,
+# and anything else checkov supports in the scanned tree.
+#
+# soft-fail stays false: the workflow controls pass/fail centrally through
+# severity-gate.sh, so checkov reports honestly and the gate decides.
+
+framework:
+  - all
+
+soft-fail: false
+
+# Suppressions. Empty by design — ships with zero skipped checks.
+# Prefer inline suppressions in the offending file (checkov:skip=CKV_AWS_20)
+# with a justification comment; use this list only for policy-level decisions
+# that apply repo-wide.
+#
+# Examples:
+#
+# skip-check:
+#   - CKV_AWS_20   # S3 public read — public website buckets are intentional in this org
+#   - CKV_K8S_43   # image digest pinning — enforced by admission controller instead
+skip-check: []
+
+# Keep CI logs readable: only print failed checks.
+quiet: true
+compact: true

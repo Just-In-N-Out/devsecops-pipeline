@@ -1,0 +1,37 @@
+# Trivy ignore baseline — devsecops-pipeline
+#
+# Empty by design. The pipeline ships with zero suppressed vulnerabilities;
+# every ignore is consumer-owned debt and belongs in the consumer's own copy.
+#
+# How to extend (in YOUR repo, not here):
+#   1. Copy this file into your repo (e.g. .trivyignore.yaml).
+#   2. Pass it to the workflow — see docs/usage.md.
+#   3. Every entry MUST have a `statement` (why it's safe to ignore) and
+#      SHOULD have an `expired_at` so suppressions self-revoke instead of
+#      rotting forever.
+#
+# Format reference: https://trivy.dev/latest/docs/configuration/filtering/
+#
+# Example entries:
+#
+# vulnerabilities:
+#   - id: CVE-2023-12345
+#     paths:
+#       - "usr/lib/node_modules/example/**"
+#     expired_at: 2026-09-30
+#     statement: "Not exploitable — vulnerable function never called; tracked in ISSUE-421"
+#
+# misconfigurations:
+#   - id: AVD-DS-0002
+#     statement: "Root user required by vendor base image; compensating control: read-only fs"
+#
+# secrets:
+#   - id: aws-access-key-id
+#     paths:
+#       - "tests/fixtures/**"
+#     statement: "Synthetic credentials used by integration tests"
+
+vulnerabilities: []
+misconfigurations: []
+secrets: []
+licenses: []
