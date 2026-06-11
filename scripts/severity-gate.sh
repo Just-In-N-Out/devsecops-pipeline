@@ -18,6 +18,7 @@
 #   BASELINE_BRANCH     branch whose findings are pre-existing debt (default: "" = off)
 #   STAGE_NAME          stage label when SARIF_DIR is flat          (default: scan)
 #   SUMMARY_PATH        where to write scan-summary.json            (default: ./scan-summary.json)
+#   BASELINE_ARTIFACT_NAME  artifact holding the baseline summary   (default: scan-summary)
 #   GITHUB_REPOSITORY / GITHUB_TOKEN or GH_TOKEN — required only for baseline fetch
 set -euo pipefail
 
@@ -27,6 +28,7 @@ FAIL_ON_FINDINGS="${FAIL_ON_FINDINGS:-true}"
 BASELINE_BRANCH="${BASELINE_BRANCH:-}"
 STAGE_NAME="${STAGE_NAME:-scan}"
 SUMMARY_PATH="${SUMMARY_PATH:-./scan-summary.json}"
+BASELINE_ARTIFACT_NAME="${BASELINE_ARTIFACT_NAME:-scan-summary}"
 TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 
 case "$SEVERITY_THRESHOLD" in
@@ -115,7 +117,7 @@ if [ -n "$BASELINE_BRANCH" ] && [ "$TOTAL_COUNT" -gt 0 ]; then
   else
     echo "Fetching baseline scan summary from branch '$BASELINE_BRANCH'..."
     export GH_TOKEN="$TOKEN"
-    archive_url="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=scan-summary&per_page=100" \
+    archive_url="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$BASELINE_ARTIFACT_NAME&per_page=100" \
       --jq "[.artifacts[] | select(.workflow_run.head_branch == \"$BASELINE_BRANCH\" and .expired == false)] | sort_by(.created_at) | last | .archive_download_url // empty" \
       2>/dev/null || true)"
     if [ -n "$archive_url" ]; then

@@ -14,7 +14,12 @@
 
 const fs = require('fs');
 
-const MARKER = '<!-- devsecops-pipeline-comment -->';
+// STAGE_MARKER scopes the sticky comment when a sub-workflow runs standalone,
+// so e.g. a lone sast scan and a lone deps scan on the same PR each keep
+// their own comment instead of overwriting a shared one.
+const MARKER = `<!-- devsecops-pipeline-comment${
+  process.env.STAGE_MARKER ? `:${process.env.STAGE_MARKER}` : ''
+} -->`;
 const SEVERITIES = ['critical', 'high', 'medium', 'low'];
 const MAX_FINDINGS_PER_STAGE = 10;
 

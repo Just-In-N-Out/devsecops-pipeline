@@ -1,0 +1,130 @@
+name: SAST (Semgrep)
+
+# Reusable static-analysis stage. Composes public Semgrep registry packs
+# listed in configs/semgrep.yml — maintained rulesets beat hand-rolled rules.
+
+on:
+  workflow_call:
+    inputs:
+      language:
+        description: "Adds a language pack on top of the base packs: python | node | go | java | generic"
+        type: string
+        default: generic
+      severity-threshold:
+        description: Findings at or above this level fail the build
+        type: string
+        default: high
+      baseline-branch:
+        description: Only gate on findings not already present on this branch
+        type: string
+        default: main
+      fail-on-findings:
+        description: If false, report findings but never fail (advisory mode)
+        type: boolean
+        default: true
+      post-comment:
+        description: Post a sticky PR comment (full-scan disables this and posts one consolidated comment instead)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  semgrep:
+    name: semgrep
+    runs-on: ubuntu-latest
+    container:
+      # Digest-pinned. Spec named returntocorp/semgrep; that Docker Hub org was
+      # renamed — semgrep/semgrep is the same official image.
+      image: docker.io/semgrep/semgrep:1.165.0@sha256:f4791a54c891eabe1188248135574e6e03dfc31dfd3f3b747c7bec7079bfed1b
+    permissions:
+      contents: read
+      security-events: write # SARIF -> Security tab
+      actions: read          # baseline artifact download
+      pull-requests: write   # sticky PR comment
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Resolve pipeline repo and ref
+        id: pipeline
+        env:
+          JOB_WORKFLOW_REF: ${{ github.job_workflow_ref }}
+        run: |
+          echo "repo=${JOB_WORKFLOW_REF%%/.github/*}" >> "$GITHUB_OUTPUT"
+          echo "ref=${JOB_WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ${{ steps.pipeline.outputs.repo }}
+          ref: ${{ steps.pipeline.outputs.ref }}
+          path: .devsecops-pipeline
+
+      # The manifest is parsed line-wise on purpose — no YAML tooling needed
+      # inside the scanner container. Keep configs/semgrep.yml flat.
+      - name: Run semgrep
+        env:
+          LANGUAGE: ${{ inputs.language }}
+        run: |
+          manifest=.devsecops-pipeline/configs/semgrep.yml
+          config_args=""
+          # POSIX sh only — the semgrep container has no bash
+          for pack in $(awk '/^base-packs:/{f=1;next} /^[a-z]/{f=0} f && $1=="-"{print $2}' "$manifest"); do
+            config_args="$config_args --config $pack"
+          done
+          lang_pack="$(awk -v l="$LANGUAGE:" '/^language-packs:/{f=1;next} /^[a-z]/{f=0} f && $1==l{print $2}' "$manifest")"
+          [ -n "$lang_pack" ] && config_args="$config_args --config $lang_pack"
+          echo "semgrep config: $config_args"
+          mkdir -p sarif-out
+          # --exclude the pipeline checkout: its rule/docs content is not the
+          # consumer's code. Semgrep exits 0 on findings; the gate decides.
+          semgrep scan $config_args \
+            --metrics=off \
+            --exclude .devsecops-pipeline \
+            --sarif --output sarif-out/semgrep.sarif .
+
+      - name: Upload SARIF artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sarif-sast
+          path: sarif-out/
+          if-no-files-found: ignore
+
+      - name: Upload SARIF to Security tab
+        if: hashFiles('sarif-out/semgrep.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        with:
+          sarif_file: sarif-out/semgrep.sarif
+          category: sast
+
+      - name: Severity gate
+        env:
+          SARIF_DIR: sarif-out
+          STAGE_NAME: sast
+          SEVERITY_THRESHOLD: ${{ inputs.severity-threshold }}
+          FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+          BASELINE_BRANCH: ${{ inputs.baseline-branch }}
+          BASELINE_ARTIFACT_NAME: scan-summary-sast
+          SUMMARY_PATH: scan-summary.json
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash .devsecops-pipeline/scripts/severity-gate.sh
+
+      - name: Upload scan summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scan-summary-sast
+          path: scan-summary.json
+          if-no-files-found: ignore
+
+      - name: Post PR comment
+        if: always() && inputs.post-comment && github.event_name == 'pull_request'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          SUMMARY_PATH: scan-summary.json
+          STAGE_MARKER: sast
+        with:
+          script: |
+            const run = require('./.devsecops-pipeline/scripts/pr-comment.js');
+            await run({ github, context, core });
