@@ -19,6 +19,8 @@
 #   STAGE_NAME          stage label when SARIF_DIR is flat          (default: scan)
 #   SUMMARY_PATH        where to write scan-summary.json            (default: ./scan-summary.json)
 #   BASELINE_ARTIFACT_NAME  artifact holding the baseline summary   (default: scan-summary)
+#   BASELINE_SUMMARY_PATH   also save the downloaded baseline here  (default: "" = don't)
+#   TREND_PATH          write recent-runs trend JSON here           (default: "" = don't)
 #   GITHUB_REPOSITORY / GITHUB_TOKEN or GH_TOKEN — required only for baseline fetch
 set -euo pipefail
 
@@ -29,6 +31,8 @@ BASELINE_BRANCH="${BASELINE_BRANCH:-}"
 STAGE_NAME="${STAGE_NAME:-scan}"
 SUMMARY_PATH="${SUMMARY_PATH:-./scan-summary.json}"
 BASELINE_ARTIFACT_NAME="${BASELINE_ARTIFACT_NAME:-scan-summary}"
+BASELINE_SUMMARY_PATH="${BASELINE_SUMMARY_PATH:-}"
+TREND_PATH="${TREND_PATH:-}"
 TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 
 case "$SEVERITY_THRESHOLD" in
@@ -106,33 +110,71 @@ done < <(jq -c '.[]' "$ALL_FINDINGS")
 
 TOTAL_COUNT="$(jq 'length' "$FP_FINDINGS")"
 
-# --- 3. Baseline diff ---------------------------------------------------------
+# --- 3. Baseline diff + trend history ------------------------------------------
 BASELINE_FPS="$WORKDIR/baseline-fps.json"
 echo "[]" > "$BASELINE_FPS"
 baseline_applied=false
 
+# One artifact-list call feeds both the baseline (latest summary) and the
+# trend (last 10 summaries) so the API surface stays small.
+ARTIFACTS_JSON="$WORKDIR/artifacts.json"
+have_artifacts=false
+if [ -n "$BASELINE_BRANCH" ] && [ -n "$TOKEN" ] && [ -n "${GITHUB_REPOSITORY:-}" ] && command -v gh >/dev/null; then
+  export GH_TOKEN="$TOKEN"
+  if gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$BASELINE_ARTIFACT_NAME&per_page=100" \
+       --jq "[.artifacts[] | select(.workflow_run.head_branch == \"$BASELINE_BRANCH\" and .expired == false)] | sort_by(.created_at)" \
+       > "$ARTIFACTS_JSON" 2>/dev/null \
+     && [ "$(jq 'length' "$ARTIFACTS_JSON")" -gt 0 ]; then
+    have_artifacts=true
+  fi
+fi
+
+# download_summary <archive_url> <dir> — fetch+unzip a scan-summary artifact
+download_summary() {
+  curl -sSfL -H "Authorization: Bearer $TOKEN" -o "$2/a.zip" "$1" 2>/dev/null \
+    && unzip -q -o "$2/a.zip" -d "$2" 2>/dev/null \
+    && [ -f "$2/scan-summary.json" ]
+}
+
 if [ -n "$BASELINE_BRANCH" ] && [ "$TOTAL_COUNT" -gt 0 ]; then
-  if [ -z "$TOKEN" ] || [ -z "${GITHUB_REPOSITORY:-}" ] || ! command -v gh >/dev/null; then
-    echo "::warning::Baseline branch '$BASELINE_BRANCH' set but no token/repo/gh available — gating on ALL findings"
-  else
+  if [ "$have_artifacts" = true ]; then
     echo "Fetching baseline scan summary from branch '$BASELINE_BRANCH'..."
-    export GH_TOKEN="$TOKEN"
-    archive_url="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$BASELINE_ARTIFACT_NAME&per_page=100" \
-      --jq "[.artifacts[] | select(.workflow_run.head_branch == \"$BASELINE_BRANCH\" and .expired == false)] | sort_by(.created_at) | last | .archive_download_url // empty" \
-      2>/dev/null || true)"
-    if [ -n "$archive_url" ]; then
-      if curl -sSfL -H "Authorization: Bearer $TOKEN" -o "$WORKDIR/baseline.zip" "$archive_url" \
-         && unzip -q -o "$WORKDIR/baseline.zip" -d "$WORKDIR/baseline" 2>/dev/null \
-         && [ -f "$WORKDIR/baseline/scan-summary.json" ]; then
-        jq '[.stages[]?.findings[]?.fingerprint] | unique' "$WORKDIR/baseline/scan-summary.json" > "$BASELINE_FPS"
-        baseline_applied=true
-        echo "Baseline loaded: $(jq 'length' "$BASELINE_FPS") known finding(s)"
-      else
-        echo "::warning::Failed to download/parse baseline artifact — gating on ALL findings"
+    archive_url="$(jq -r 'last | .archive_download_url' "$ARTIFACTS_JSON")"
+    mkdir -p "$WORKDIR/baseline"
+    if download_summary "$archive_url" "$WORKDIR/baseline"; then
+      jq '[.stages[]?.findings[]?.fingerprint] | unique' "$WORKDIR/baseline/scan-summary.json" > "$BASELINE_FPS"
+      baseline_applied=true
+      echo "Baseline loaded: $(jq 'length' "$BASELINE_FPS") known finding(s)"
+      if [ -n "$BASELINE_SUMMARY_PATH" ]; then
+        cp "$WORKDIR/baseline/scan-summary.json" "$BASELINE_SUMMARY_PATH"
       fi
     else
-      echo "::warning::No scan-summary artifact found for branch '$BASELINE_BRANCH' (first run?) — gating on ALL findings"
+      echo "::warning::Failed to download/parse baseline artifact — gating on ALL findings"
     fi
+  elif [ -z "$TOKEN" ] || [ -z "${GITHUB_REPOSITORY:-}" ] || ! command -v gh >/dev/null; then
+    echo "::warning::Baseline branch '$BASELINE_BRANCH' set but no token/repo/gh available — gating on ALL findings"
+  else
+    echo "::warning::No $BASELINE_ARTIFACT_NAME artifact found for branch '$BASELINE_BRANCH' (first run?) — gating on ALL findings"
+  fi
+fi
+
+if [ -n "$TREND_PATH" ]; then
+  echo "[]" > "$TREND_PATH"
+  if [ "$have_artifacts" = true ]; then
+    count="$(jq 'length' "$ARTIFACTS_JSON")"
+    start=$(( count > 10 ? count - 10 : 0 ))
+    jq -c ".[$start:] | .[]" "$ARTIFACTS_JSON" | while IFS= read -r art; do
+      tdir="$(mktemp -d -p "$WORKDIR")"
+      if download_summary "$(jq -r '.archive_download_url' <<<"$art")" "$tdir"; then
+        jq -c --argjson art "$art" \
+          '{created_at: $art.created_at, run_id: ($art.workflow_run.id // null), totals: .totals, verdict: (.verdict // null)}' \
+          "$tdir/scan-summary.json" >> "$WORKDIR/trend-lines.json" || true
+      fi
+    done
+    if [ -s "$WORKDIR/trend-lines.json" ]; then
+      jq -s 'sort_by(.created_at)' "$WORKDIR/trend-lines.json" > "$TREND_PATH"
+    fi
+    echo "Trend history: $(jq 'length' "$TREND_PATH") prior run(s) on '$BASELINE_BRANCH'"
   fi
 fi
 
@@ -140,6 +182,8 @@ fi
 jq --slurpfile baseline "$BASELINE_FPS" \
    --arg threshold "$SEVERITY_THRESHOLD" \
    --arg baseline_branch "$BASELINE_BRANCH" \
+   --arg fail_on "$FAIL_ON_FINDINGS" \
+   --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
    --argjson baseline_applied "$baseline_applied" \
    --argjson threshold_rank "$THRESHOLD_RANK" '
 def rank($s): {critical:4, high:3, medium:2, low:1}[$s];
@@ -150,6 +194,11 @@ def rank($s): {critical:4, high:3, medium:2, low:1}[$s];
     threshold: $threshold,
     baseline_branch: $baseline_branch,
     baseline_applied: $baseline_applied,
+    fail_on_findings: ($fail_on == "true"),
+    generated_at: $generated_at,
+    verdict: (if ($violations | length) == 0 then "pass"
+              elif $fail_on == "true" then "fail"
+              else "advisory" end),
     totals: {
       critical: ($findings | map(select(.severity == "critical")) | length),
       high:     ($findings | map(select(.severity == "high"))     | length),
