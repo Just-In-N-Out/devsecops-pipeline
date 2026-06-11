@@ -58,7 +58,7 @@ function renderFindings(stageData) {
   ].join('\n') + overflow;
 }
 
-function render(summary, repoUrl) {
+function render(summary, repoUrl, runUrl) {
   const stages = summary.stages || {};
   const totals = summary.totals || { critical: 0, high: 0, medium: 0, low: 0, violations: 0 };
   const failed = totals.violations > 0;
@@ -114,7 +114,7 @@ function render(summary, repoUrl) {
 
   lines.push(
     '',
-    `🔎 Full results: [GitHub Security tab](${securityUrl}) · 📋 \`scan-summary\` artifact on this run`,
+    `🔎 Full results: [GitHub Security tab](${securityUrl}) · 📊 Interactive HTML report: \`security-report\` artifact${runUrl ? ` on [this run](${runUrl})` : ''}`,
     '',
     '<sub>Posted by <a href="https://github.com/Just-In-N-Out/devsecops-pipeline">devsecops-pipeline</a> — this comment updates in place.</sub>'
   );
@@ -156,7 +156,8 @@ module.exports = async function run({ github, context, core }) {
   }
   const summary = loadSummary(summaryPath);
   const repoUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`;
-  const body = render(summary, repoUrl);
+  const runUrl = context.runId ? `${repoUrl}/actions/runs/${context.runId}` : null;
+  const body = render(summary, repoUrl, runUrl);
   await upsertComment({ github, context, core }, body);
 };
 

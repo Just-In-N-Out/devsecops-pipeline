@@ -224,8 +224,29 @@ jobs:
           BASELINE_BRANCH: ${{ inputs.baseline-branch }}
           BASELINE_ARTIFACT_NAME: scan-summary
           SUMMARY_PATH: scan-summary.json
+          BASELINE_SUMMARY_PATH: baseline-summary.json
+          TREND_PATH: trend.json
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash .devsecops-pipeline/scripts/severity-gate.sh
+
+      # always(): a failed gate is exactly when the report matters most.
+      - name: Generate HTML report
+        if: always()
+        env:
+          SUMMARY_PATH: scan-summary.json
+          SARIF_DIR: sarif
+          BASELINE_SUMMARY_PATH: baseline-summary.json
+          TREND_PATH: trend.json
+          OUTPUT_PATH: report.html
+        run: node .devsecops-pipeline/scripts/html-report.js
+
+      - name: Upload security report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-report
+          path: report.html
+          if-no-files-found: ignore
 
       - name: Upload consolidated scan summary
         if: always()
