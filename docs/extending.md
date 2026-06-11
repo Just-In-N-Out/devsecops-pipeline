@@ -147,8 +147,9 @@ jobs:
    decides and comments).
 2. Add the job to the gate's `needs:` list.
 3. Nothing else: the gate discovers stages from `sarif-*` artifact names, so
-   the new stage appears in the summary, the comment, and the verdict
-   automatically.
+   the new stage appears in the summary, the comment, the HTML report
+   (including its remediation panels, which read your stage's SARIF rule
+   metadata), and the verdict automatically.
 4. Document the stage in README ("What runs") and `docs/usage.md`
    (`skip-stages` value).
 

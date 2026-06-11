@@ -180,9 +180,13 @@ your diff, possibly via a dependency bump). The PR comment distinguishes
 total vs new counts.
 
 **Where do results live?**
-Three places: the PR sticky comment (summary + top findings), the
-repo's Security tab → Code scanning (full, queryable, with per-stage
-categories), and run artifacts (`sarif-*` raw output, `scan-summary` JSON).
+Four places: the PR sticky comment (summary + top findings), the repo's
+Security tab → Code scanning (full, queryable, with per-stage categories),
+the workflow run page (condensed job summary with verdict and per-stage
+table), and run artifacts — `security-report` (interactive HTML report:
+charts, baseline delta, trend, per-finding remediation; download and open in
+any browser, works offline), `sarif-*` (raw scanner output), and
+`scan-summary` (merged JSON).
 
 **Does this work on private repos?**
 Yes — GitHub code scanning upload requires GitHub Advanced Security on

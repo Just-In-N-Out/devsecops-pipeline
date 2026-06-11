@@ -54,6 +54,13 @@ covers it.
 Every stage outputs SARIF: uploaded as run artifacts, pushed to the GitHub
 Security tab per-stage, and evaluated once by a consolidated severity gate.
 
+After every run the gate also renders an **interactive HTML report**
+(`security-report` artifact — self-contained, opens offline in any browser):
+verdict explainer, severity/stage charts, **new vs fixed vs persisting** delta
+against the baseline, a findings trend across recent runs, and a filterable
+findings table with per-finding remediation guidance. A condensed version
+appears directly on the workflow run page, and PR comments link to it.
+
 ## Gating
 
 Findings at or above `severity-threshold` block; below it they warn. With

@@ -21,6 +21,7 @@ flowchart TD
     container -- "sarif-container" --> gate
     gate -- "scan-summary.json" --> verdict{"pass / fail"}
     gate -- "sticky comment" --> pr[PR conversation]
+    gate -- "report.html + job summary" --> report["security-report artifact<br/>+ run page"]
     secrets & sast & deps & iac & container -- "upload-sarif" --> sectab[GitHub Security tab]
 ```
 
@@ -103,6 +104,32 @@ schedule, while the PR bar stays "don't make it worse."
 
 If no baseline artifact exists yet (first run), the gate warns and evaluates
 all findings — fail-open on *data*, never on *policy*.
+
+## The HTML report
+
+The gate job's last act is rendering `report.html` (uploaded as the
+`security-report` artifact) plus a condensed job summary on the run page.
+Design constraints worth knowing:
+
+- **Pure renderer.** `scripts/html-report.js` is a function of four files the
+  gate already produced — `scan-summary.json`, raw SARIF (for full rule help
+  text), `baseline-summary.json`, `trend.json`. No API calls, fully testable
+  with fixtures. Data *fetching* (baseline, trend artifacts) stays in
+  `severity-gate.sh`, which already has `gh` and `unzip`.
+- **Zero dependencies, self-contained.** Charts are hand-rolled SVG and the
+  filtering is a small block of vanilla JS, all inlined — no CDN scripts. A
+  security pipeline that enforces SHA-pinning doesn't get to load unpinned
+  chart libraries at render time; it also means the downloaded file works
+  offline.
+- **The feedback loop.** The report's delta panel classifies every finding as
+  new / fixed / persisting by comparing fingerprints against the baseline
+  summary, and the trend chart plots severity totals across the last ~10
+  scans of the baseline branch. Developers see whether they're making it
+  better, not just whether they failed.
+- **An artifact, not a website.** Reports contain security findings; the
+  artifact inherits the repo's access control. Publishing to a live URL
+  (GitHub Pages) was rejected as a default because it would make findings
+  public for public repos.
 
 ## Severity classification
 
