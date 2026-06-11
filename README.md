@@ -17,6 +17,8 @@ on:
   push:
     branches: [main]
   pull_request:
+permissions:
+  contents: read
 jobs:
   security:
     uses: Just-In-N-Out/devsecops-pipeline/.github/workflows/full-scan.yml@v1
@@ -27,6 +29,15 @@ jobs:
 Done. Every push and PR now gets five parallel security scans, results in the
 Security tab, a sticky summary comment on PRs, and a merge gate on new
 high/critical findings.
+
+> The top-level `permissions: contents: read` makes the workflow least-privilege
+> by default — without it, the pipeline's own IaC scanner flags your workflow
+> (`CKV2_GHA_1`). The `permissions` on the `security` job widens only what the
+> scans need.
+
+See it live: [**devsecops-pipeline-demo**][demo] is a sample repo that consumes
+this pipeline — a clean `main` (green) and an open PR full of planted findings
+(red gate, scan comment, HTML report).
 
 ## Inputs
 
@@ -74,6 +85,8 @@ break-glass procedure are in [docs/gating-policy.md](docs/gating-policy.md).
 Each stage is independently callable with the same gate semantics:
 
 ```yaml
+permissions:
+  contents: read
 jobs:
   secrets-only:
     uses: Just-In-N-Out/devsecops-pipeline/.github/workflows/secrets-scan.yml@v1
@@ -121,6 +134,7 @@ intentional-failure test for proving your gate wiring:
 [self-test]: https://github.com/Just-In-N-Out/devsecops-pipeline/actions/workflows/self-test.yml
 [sbom-wf]: .github/workflows/sbom.yml
 [releases]: https://github.com/Just-In-N-Out/devsecops-pipeline/releases
+[demo]: https://github.com/Just-In-N-Out/devsecops-pipeline-demo
 [Gitleaks]: https://github.com/gitleaks/gitleaks
 [Semgrep]: https://semgrep.dev
 [Trivy]: https://trivy.dev

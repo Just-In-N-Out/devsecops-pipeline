@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-06-11
+
+### Fixed
+
+- Quickstart and usage examples now set a top-level `permissions: contents: read`.
+  Without it, a consumer's own workflow file fails the pipeline's IaC scanner
+  (`CKV2_GHA_1`, "top-level permissions are not set to write-all"). Surfaced by
+  the new [devsecops-pipeline-demo][demo] consumer repo.
+
+### Added
+
+- README links to [devsecops-pipeline-demo][demo] — a sample consumer repo with
+  a clean `main` and an open PR of planted findings, demonstrating the pipeline
+  catching one issue per scanner end-to-end.
+
+[demo]: https://github.com/Just-In-N-Out/devsecops-pipeline-demo
+
 ## [1.1.0] — 2026-06-11
 
 ### Added
@@ -53,7 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Every third-party action pinned to a full commit SHA (never a floating tag)
 - Zero secrets, tokens, or credentials committed to the repo — public-safe by construction
 
-[Unreleased]: https://github.com/Just-In-N-Out/devsecops-pipeline/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/Just-In-N-Out/devsecops-pipeline/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/Just-In-N-Out/devsecops-pipeline/releases/tag/v1.1.1
 [1.1.0]: https://github.com/Just-In-N-Out/devsecops-pipeline/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Just-In-N-Out/devsecops-pipeline/releases/tag/v1.0.0
 [0.1.0]: https://github.com/Just-In-N-Out/devsecops-pipeline/releases/tag/v0.1.0

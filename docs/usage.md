@@ -56,6 +56,8 @@ one step — sequence it:
 
 ```yaml
 # Phase 1 (week 1): observe. Nothing fails; Security tab + PR comments populate.
+permissions:
+  contents: read
 jobs:
   security:
     uses: Just-In-N-Out/devsecops-pipeline/.github/workflows/full-scan.yml@v1
@@ -84,6 +86,8 @@ schedule, then optionally tighten `severity-threshold` to `medium`.
 ### Python project with a container image
 
 ```yaml
+permissions:
+  contents: read
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -119,6 +123,8 @@ No app code means most stages have nothing to chew on — skip them and keep
 the run fast:
 
 ```yaml
+permissions:
+  contents: read
 jobs:
   security:
     uses: Just-In-N-Out/devsecops-pipeline/.github/workflows/full-scan.yml@v1
@@ -141,6 +147,8 @@ is the star, and `sbom` still inventories providers/modules.
 Every stage is a standalone reusable workflow with the same gate semantics:
 
 ```yaml
+permissions:
+  contents: read
 jobs:
   secrets-only:
     uses: Just-In-N-Out/devsecops-pipeline/.github/workflows/secrets-scan.yml@v1
