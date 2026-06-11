@@ -1,0 +1,234 @@
+name: Full security scan
+
+# Main entry point. Consumers reference THIS workflow:
+#
+#   jobs:
+#     security:
+#       uses: Just-In-N-Out/devsecops-pipeline/.github/workflows/full-scan.yml@v1
+#       secrets: inherit
+#
+# Orchestration: detect-language runs first; all scan stages run in parallel
+# after it; a single gate job evaluates every stage's SARIF at the end.
+# Stages are called in advisory mode (fail-on-findings: false) so one slow or
+# noisy scanner never short-circuits the others — the gate is the only place
+# pass/fail is decided, which is what makes baseline-diff and advisory
+# rollouts behave consistently.
+
+on:
+  workflow_call:
+    inputs:
+      language:
+        description: "python | node | go | java | auto — controls which SAST language pack runs; auto detects from repo contents"
+        type: string
+        default: auto
+      severity-threshold:
+        description: "critical | high | medium | low — findings at or above this level fail the build"
+        type: string
+        default: high
+      skip-stages:
+        description: "Comma-separated stages to skip: secrets,sast,deps,iac,container,sbom"
+        type: string
+        default: ""
+      baseline-branch:
+        description: Only gate on findings not present in this branch's latest scan
+        type: string
+        default: main
+      container-image:
+        description: "Image ref to scan (e.g. ghcr.io/org/app:sha). Empty = container stage skipped"
+        type: string
+        default: ""
+      fail-on-findings:
+        description: If false, run in advisory mode — report but never fail
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  detect-language:
+    name: detect language
+    runs-on: ubuntu-latest
+    outputs:
+      language: ${{ steps.detect.outputs.language }}
+    steps:
+      - if: inputs.language == 'auto'
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Detect
+        id: detect
+        env:
+          INPUT_LANGUAGE: ${{ inputs.language }}
+        run: |
+          if [ "$INPUT_LANGUAGE" != "auto" ]; then
+            lang="$INPUT_LANGUAGE"
+          elif [ -f requirements.txt ] || [ -f pyproject.toml ] || [ -f setup.py ] || [ -f Pipfile ]; then
+            lang=python
+          elif [ -f package.json ]; then
+            lang=node
+          elif [ -f go.mod ]; then
+            lang=go
+          elif [ -f pom.xml ] || [ -f build.gradle ] || [ -f build.gradle.kts ]; then
+            lang=java
+          else
+            lang=generic
+          fi
+          echo "language=$lang" >> "$GITHUB_OUTPUT"
+          echo "Detected language: $lang"
+
+  secrets:
+    needs: detect-language
+    if: ${{ !contains(format(',{0},', inputs.skip-stages), ',secrets,') }}
+    uses: ./.github/workflows/secrets-scan.yml
+    secrets: inherit
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+      pull-requests: write
+    with:
+      severity-threshold: ${{ inputs.severity-threshold }}
+      baseline-branch: ${{ inputs.baseline-branch }}
+      fail-on-findings: false
+      post-comment: false
+
+  sast:
+    needs: detect-language
+    if: ${{ !contains(format(',{0},', inputs.skip-stages), ',sast,') }}
+    uses: ./.github/workflows/sast.yml
+    secrets: inherit
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+      pull-requests: write
+    with:
+      language: ${{ needs.detect-language.outputs.language }}
+      severity-threshold: ${{ inputs.severity-threshold }}
+      baseline-branch: ${{ inputs.baseline-branch }}
+      fail-on-findings: false
+      post-comment: false
+
+  deps:
+    needs: detect-language
+    if: ${{ !contains(format(',{0},', inputs.skip-stages), ',deps,') }}
+    uses: ./.github/workflows/deps-scan.yml
+    secrets: inherit
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+      pull-requests: write
+    with:
+      severity-threshold: ${{ inputs.severity-threshold }}
+      baseline-branch: ${{ inputs.baseline-branch }}
+      fail-on-findings: false
+      post-comment: false
+
+  iac:
+    needs: detect-language
+    if: ${{ !contains(format(',{0},', inputs.skip-stages), ',iac,') }}
+    uses: ./.github/workflows/iac-scan.yml
+    secrets: inherit
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+      pull-requests: write
+    with:
+      severity-threshold: ${{ inputs.severity-threshold }}
+      baseline-branch: ${{ inputs.baseline-branch }}
+      fail-on-findings: false
+      post-comment: false
+
+  container:
+    needs: detect-language
+    if: ${{ inputs.container-image != '' && !contains(format(',{0},', inputs.skip-stages), ',container,') }}
+    uses: ./.github/workflows/container-scan.yml
+    secrets: inherit
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+      pull-requests: write
+    with:
+      container-image: ${{ inputs.container-image }}
+      severity-threshold: ${{ inputs.severity-threshold }}
+      baseline-branch: ${{ inputs.baseline-branch }}
+      fail-on-findings: false
+      post-comment: false
+
+  sbom:
+    needs: detect-language
+    if: ${{ !contains(format(',{0},', inputs.skip-stages), ',sbom,') }}
+    uses: ./.github/workflows/sbom.yml
+    secrets: inherit
+    permissions:
+      contents: write
+
+  gate:
+    name: severity gate
+    needs: [detect-language, secrets, sast, deps, iac, container, sbom]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read        # baseline artifact download
+      pull-requests: write # consolidated sticky PR comment
+    steps:
+      # Scan stages run advisory, so a 'failure' result means the stage
+      # ERRORED (crash, bad checkout, registry down) — that's missing data,
+      # and missing data must never look like a clean pass.
+      - name: Fail if any scan stage errored
+        if: ${{ contains(needs.*.result, 'failure') }}
+        run: |
+          echo "::error::One or more scan stages failed to execute — refusing to gate on incomplete results"
+          exit 1
+
+      - name: Resolve pipeline repo and ref
+        id: pipeline
+        env:
+          JOB_WORKFLOW_REF: ${{ github.job_workflow_ref }}
+        run: |
+          echo "repo=${JOB_WORKFLOW_REF%%/.github/*}" >> "$GITHUB_OUTPUT"
+          echo "ref=${JOB_WORKFLOW_REF##*@}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ${{ steps.pipeline.outputs.repo }}
+          ref: ${{ steps.pipeline.outputs.ref }}
+          path: .devsecops-pipeline
+
+      - name: Download stage SARIF artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: sarif-*
+          path: sarif
+
+      - name: Severity gate
+        env:
+          SARIF_DIR: sarif
+          SEVERITY_THRESHOLD: ${{ inputs.severity-threshold }}
+          FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+          BASELINE_BRANCH: ${{ inputs.baseline-branch }}
+          BASELINE_ARTIFACT_NAME: scan-summary
+          SUMMARY_PATH: scan-summary.json
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash .devsecops-pipeline/scripts/severity-gate.sh
+
+      - name: Upload consolidated scan summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scan-summary
+          path: scan-summary.json
+          if-no-files-found: ignore
+
+      - name: Post PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          SUMMARY_PATH: scan-summary.json
+        with:
+          script: |
+            const run = require('./.devsecops-pipeline/scripts/pr-comment.js');
+            await run({ github, context, core });
