@@ -26,7 +26,7 @@ jobs:
     permissions: {contents: write, security-events: write, actions: read, pull-requests: write}
 ```
 
-Done. Every push and PR now gets five parallel security scans, results in the
+Done. Every push and PR now gets six parallel scan stages across five scanners, results in the
 Security tab, a sticky summary comment on PRs, and a merge gate on new
 high/critical findings.
 
